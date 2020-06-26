@@ -1,0 +1,12 @@
+[package]
+name = "maverick"
+version = "0.1.0"
+authors = ["randomlshb@gmail.com <randomlshb@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+quicksilver = { version = "0.4.0-alpha0.5", features = ["stdweb"] }
+log = "0.4"
+rand = { version="0.7.3", features = ["stdweb"] }
