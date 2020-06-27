@@ -2,7 +2,9 @@
 // Draw an image to the screen
 use quicksilver::{
     geom::{Rectangle, Vector},
+    geom::Shape,
     graphics::{Color, Image},
+    input::*,
     run, Graphics, Input, Result, Settings, Window,
 };
 
@@ -214,7 +216,7 @@ impl Game {
     }
 
     /// Draw the current game state using the given `Graphics`
-    pub async fn draw(&self, window: &Window, gfx: &mut Graphics) -> Result<()> {
+    pub async fn draw(&self, window: &Window, gfx: &mut Graphics, location: Option<Vector>) -> Result<()> {
         const PADDING: f32 = 10.0;
 
         // Start row 1 from `PADDING` from the top
@@ -247,6 +249,13 @@ impl Game {
 
             // Draw each image in Row 2
             let region = Rectangle::new(Vector::new(curr_x, curr_y), image_size);
+
+            if let Some(l) = location {
+                if region.contains(l) {
+                    gfx.stroke_rect(&region, Color::RED);
+                }
+            }
+
             gfx.draw_image(&image, region);
 
             let width = image_size.x;
@@ -278,15 +287,25 @@ impl Game {
 
 // This time we might return an error, so we use a Result
 async fn app(window: Window, mut gfx: Graphics, mut input: Input) -> Result<()> {
-    // Load the image and wait for it to finish
-    // We also use '?' to handle errors like file-not-found
-    gfx.clear(Color::BLACK);
-
+    // Initialize this game
     let game = Game::init(&gfx).await?;
-    game.draw(&window, &mut gfx).await?;
 
     loop {
-        while let Some(_) = input.next_event().await {}
+        let mut location = None;
+        while let Some(event) = input.next_event().await {
+            match event {
+                Event::PointerMoved(e) => {
+                    location = Some(e.location());
+                }
+                _ => {
+                    info!("Skipping.. {:?}", event);
+                    continue;
+                }
+            }
+        }
+
+        gfx.clear(Color::BLACK);
+        game.draw(&window, &mut gfx, location).await?;
     }
 }
 
