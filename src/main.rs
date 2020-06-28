@@ -48,7 +48,8 @@ enum Action {
     Range(Entity, Direction),
     Melee(Entity),
     Move(Entity, Direction),
-    Swap
+    Swap,
+    EndTurn
 }
 
 /// Special abilities that some monsters have
@@ -229,6 +230,10 @@ struct Game {
     /// Current hand
     hand: Vec<u8>,
 
+    /// Maximum hand size: 5 for regular player and 6 when player becomes Monstrous by playing
+    /// 5 actions in one turn
+    hand_limit: u8,
+
     /// Currently selected action
     current_action: Option<Action>,
 
@@ -303,6 +308,7 @@ impl Game {
             font: VectorFont::load("iosevka-regular.ttf").await?,
             deck,
             hand,
+            hand_limit: 5,
             current_action: None,
             current_card: None,
         })
@@ -587,6 +593,33 @@ impl Game {
             curr_x += image.size().x + PADDING;
         }
 
+        let curr_x = PADDING * 3.0 + (image.size().x + PADDING) * self.hand_limit as f32;
+        let mut font = self.font.to_renderer(&gfx, 34.0)?;
+        let region = Rectangle::new(Vector::new(curr_x, curr_y), 
+                                    Vector::new(image.size().x, image.size().y / 4.0));
+
+        gfx.fill_rect(&region, Color::WHITE);
+        gfx.stroke_rect(&region, Color::GREEN);
+
+        // Add this card to available clickables
+        self.clickables.push((region, ClickableType::Action(Action::EndTurn)));
+
+        font.draw( 
+            &mut gfx,
+            &format!("End turn"),
+            Color::BLACK,
+            Vector::new(curr_x + 3.0, curr_y + image.size().y / 4.0 - PADDING),
+        )?;
+
+        let mut font = self.font.to_renderer(&gfx, 48.0)?;
+        font.draw( 
+            &mut gfx,
+            &format!("Deck left: {}", self.deck.len()),
+            Color::WHITE,
+            Vector::new(curr_x + 3.0, curr_y + image.size().y),
+        )?;
+
+
         gfx.present(&window)
     }
 
@@ -603,7 +636,9 @@ impl Game {
         // If we have selected a card and an action, perform the logic for that request
         match (self.current_action, self.current_card) {
             (Some(Action::Move(entity, direction)), Some(hand_index)) => {
-                let num = self.hand[hand_index] as usize;
+                assert!(hand_index < self.hand.len(), 
+                    "Given hand_size {} larger than hand.len() {}", hand_index, self.hand.len());
+                let num = self.hand.remove(hand_index) as usize;
 
                 match (entity, direction) {
                     (Entity::Character, Direction::Left) => {
@@ -629,6 +664,18 @@ impl Game {
                         }
                         self.companion_index = new_index;
                         info!("New companion index: {}", self.companion_index);
+                    }
+                }
+
+                // Reset the chosen card and action
+                self.current_card   = None;
+                self.current_action = None;
+            }
+            (Some(Action::EndTurn), _) => {
+                self.hand.clear();
+                for _ in 0..self.hand_limit {
+                    if let Some(new_card) = self.deck.pop() {
+                        self.hand.push(new_card);
                     }
                 }
 
