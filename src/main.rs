@@ -167,7 +167,7 @@ impl Monsters {
 /// Asset types for keys of the images loaded
 enum AssetType {
     RegPlayer,
-    BigPlayer,
+    MonstrousPlayer,
     MeleeCompanion,
     RangeCompanion,
     Action(u8),
@@ -177,11 +177,11 @@ enum AssetType {
     SwapTarget,
 }
 
-/// Current player kind. Player starts as `Regular` and shifts to `Big` if 5 actions are
+/// Current player kind. Player starts as `Regular` and shifts to `Monstrous` if 5 actions are
 /// spent on any one turn
 enum PlayerKind {
     Regular,
-    Big
+    Monstrous
 }
 
 /// Types of companions available
@@ -190,15 +190,27 @@ enum CompanionKind {
     Range
 }
 
+/// States of the game itself
+#[derive(Debug, Copy, Clone)]
+enum State {
+    Playing,
+    EndGame,
+    Reset
+}
+
 /// Type of action resulting from a click
 #[derive(Debug, Copy, Clone)]
 enum ClickableType {
     Action(Action),
     Card(usize),
+    State(State)
 }
 
 /// Global struct for handling Game State
 struct Game {
+    /// Current game state of the game
+    state: State,
+
     /// Monsters in this game
     monsters: Monsters,
 
@@ -250,7 +262,7 @@ impl Game {
 
         for (asset_type, path) in [
             (AssetType::RegPlayer, "characters_small/main_crop.png"),
-            (AssetType::BigPlayer, "characters_small/big_crop.png"),
+            (AssetType::MonstrousPlayer, "characters_small/big_crop.png"),
             (AssetType::MeleeCompanion, "companions_small/melee_crop.png"),
             (AssetType::RangeCompanion, "companions_small/range_crop.png"),
             (AssetType::Action(1),"actions_small/1black.png"),
@@ -292,12 +304,14 @@ impl Game {
             deck.swap(x, y);
         }
 
+        // Populate the initial hand
         let mut hand = Vec::new();
         for _ in 0..5 {
             hand.push(deck.pop().unwrap());
         }
 
         Ok(Game {
+            state: State::Playing,
             monsters,
             player_index: 0,
             companion_index: 0,
@@ -317,6 +331,31 @@ impl Game {
     /// Draw the current game state using the given `Graphics`
     pub async fn draw(&mut self, window: &Window, mut gfx: &mut Graphics) 
             -> Result<()> {
+        if matches!(self.state, State::EndGame) {
+            gfx.clear(Color::BLACK);
+            let mut font = VectorFont::load("iosevka-regular.ttf").await?
+                .to_renderer(&gfx, 48.0)?;
+
+            font.draw( 
+                &mut gfx,
+                "Game over!",
+                Color::RED,
+                Vector::new(10.0, 100.0),
+            )?;
+
+            font.draw( 
+                &mut gfx,
+                "LOST!",
+                Color::RED,
+                Vector::new(10.0, 150.0),
+            )?;
+
+            self.clickables.clear();
+            let fullscreen = Rectangle::new(Vector::new(10.0, 200.0), Vector::new(200.0, 200.0));
+            self.clickables.push((fullscreen, ClickableType::State(State::Reset)));
+            return gfx.present(&window);
+        }
+
         // Start row 1 from `PADDING` from the top
         let mut curr_y = PADDING;
 
@@ -327,7 +366,7 @@ impl Game {
         // Get the card type for the current player
         let image = match self.player_kind {
             PlayerKind::Regular => &self.images[&AssetType::RegPlayer],
-            PlayerKind::Big =>     &self.images[&AssetType::BigPlayer],
+            PlayerKind::Monstrous =>     &self.images[&AssetType::MonstrousPlayer],
         };
 
         // Calculate the X coord based on the player index
@@ -424,7 +463,8 @@ impl Game {
         let mut curr_x = PADDING;
         let mut offset = None;
         for monster_index in 0..MONSTER_DECK_SIZE {
-            // Draw quality of life indexes above monsters on character side to allow for easier count
+            // Draw quality of life indexes above monsters on character side to allow for easier 
+            // count
             let player_offset = (self.player_index as isize - monster_index as isize).abs();
             if player_offset > 0 && player_offset <= 5 {
                 font.draw( 
@@ -577,10 +617,14 @@ impl Game {
         // Alaways display the hand of cards in sorted order
         self.hand.sort();
 
+        let mut row_4_image_width = 0.0;
         // Draw the hand of cards
         for (i, card) in self.hand.iter().enumerate() {
             let image = &self.images[&AssetType::Action(*card)];
             let image_size = image.size();
+            if row_4_image_width == 0.0 {
+                row_4_image_width = image_size.x;
+            }
 
             // Draw each action card
             let region = Rectangle::new(Vector::new(curr_x, curr_y), image_size);
@@ -593,7 +637,7 @@ impl Game {
             curr_x += image.size().x + PADDING;
         }
 
-        let curr_x = PADDING * 3.0 + (image.size().x + PADDING) * self.hand_limit as f32;
+        let curr_x = PADDING  + (row_4_image_width + PADDING) * 6.0;
         let mut font = self.font.to_renderer(&gfx, 34.0)?;
         let region = Rectangle::new(Vector::new(curr_x, curr_y), 
                                     Vector::new(image.size().x, image.size().y / 4.0));
@@ -604,6 +648,7 @@ impl Game {
         // Add this card to available clickables
         self.clickables.push((region, ClickableType::Action(Action::EndTurn)));
 
+        // Draw the font
         font.draw( 
             &mut gfx,
             &format!("End turn"),
@@ -628,7 +673,12 @@ impl Game {
             if region.contains(location) {
                 match new_action {
                     ClickableType::Action(action) => self.current_action = Some(*action),
-                    ClickableType::Card(card) => self.current_card = Some(*card)
+                    ClickableType::Card(card) => self.current_card = Some(*card),
+                    ClickableType::State(State::Reset) => {
+                        self.state = State::Reset;
+                        return;
+                    }
+                    ClickableType::State(_) => {}
                 }
             }
         }
@@ -672,7 +722,9 @@ impl Game {
                 self.current_action = None;
             }
             (Some(Action::EndTurn), _) => {
+                // Clear the hand to be replinished
                 self.hand.clear();
+
                 for _ in 0..self.hand_limit {
                     if let Some(new_card) = self.deck.pop() {
                         self.hand.push(new_card);
@@ -687,59 +739,99 @@ impl Game {
         }
 
         info!("Current actions: {:?} {:?}", self.current_action, self.current_card);
+
+        // We are out of cards in hand and should replinish
+        if self.hand.len() == 0 {
+            // If we ran out of cards then we can always say the player is Monstrous
+            self.hand_limit = 6;
+            self.player_kind = PlayerKind::Monstrous;
+
+            for _ in 0..self.hand_limit {
+                if let Some(new_card) = self.deck.pop() {
+                    self.hand.push(new_card);
+                }
+            }
+        }
+
+        // End game is triggered when no cards in hand and no cards left in the deck
+        if self.hand.len() == 0 && self.deck.len() == 0 {
+            self.state = State::EndGame;
+        }
     }
 }
 
 // This time we might return an error, so we use a Result
 async fn app(window: Window, mut gfx: Graphics, mut input: Input) -> Result<()> {
-    // Initialize this game
-    let mut game = Game::init(&gfx).await?;
+    // Top of the reset loop. We will continue from 'reset_game when we get a reset game state
+    'reset_game: loop {
+        let mut reset_counter = 0;
+        // Display the loading screen
+        gfx.clear(Color::BLACK);
+        let mut font = VectorFont::load("iosevka-regular.ttf").await?.to_renderer(&gfx, 72.0)?;
+        font.draw( 
+            &mut gfx,
+            "Loading Maverick...",
+            Color::RED,
+            Vector::new(10.0, 150.0),
+        )?;
+        gfx.present(&window);
 
-    loop {
-        let mut location = None;
-        while let Some(event) = input.next_event().await {
-            match event {
-                Event::PointerMoved(e) => {
-                    location = Some(e.location());
-                }
-                Event::PointerInput(e) => {
-                    if !e.is_down() {
+        // Initialize this game
+        let mut game = Game::init(&gfx).await?;
+
+        'game_loop: loop {
+            let mut location = None;
+            while let Some(event) = input.next_event().await {
+                match event {
+                    Event::PointerMoved(e) => {
+                        location = Some(e.location());
+                    }
+                    Event::PointerInput(e) => {
+                        if !e.is_down() {
+                            continue;
+                        }
+
+                        game.update(input.mouse().location());
+                    }
+                    _ => {
+                        info!("Skipping.. {:?}", event);
                         continue;
                     }
-
-                    game.update(input.mouse().location());
-                }
-                _ => {
-                    info!("Skipping.. {:?}", event);
-                    continue;
                 }
             }
-        }
 
-
-        gfx.clear(Color::BLACK);
-        game.draw(&window, &mut gfx).await?;
-
-        for (region, action) in game.clickables.iter() {
-            match action {
-                ClickableType::Action(curr_action) => {
-                    if Some(*curr_action) == game.current_action {
-                        gfx.stroke_rect(&region, Color::RED);
-                    } else {
-                        gfx.stroke_rect(&region, Color::GREEN);
-                    }
-                }
-                ClickableType::Card(index) => {
-                    if Some(*index) == game.current_card {
-                        gfx.stroke_rect(&region, Color::RED);
-                    } else {
-                        gfx.stroke_rect(&region, Color::GREEN);
-                    }
-                }
-                _ => gfx.stroke_rect(&region, Color::GREEN)
+            if matches!(game.state, State::Reset) {
+                continue 'reset_game;
             }
 
-            gfx.present(&window);
+            gfx.clear(Color::BLACK);
+
+            // Draw the current game state and populate the clickables to highlight in the UI
+            game.draw(&window, &mut gfx).await?;
+
+            // Highlight each clickable found in `draw()`
+            let mut reset = false;
+            for (region, action) in &game.clickables {
+                match action {
+                    ClickableType::Action(curr_action) => {
+                        if Some(curr_action) == game.current_action.as_ref() {
+                            gfx.stroke_rect(&region, Color::RED);
+                        } else {
+                            gfx.stroke_rect(&region, Color::GREEN);
+                        }
+                    }
+                    ClickableType::Card(index) => {
+                        if Some(index) == game.current_card.as_ref() {
+                            gfx.stroke_rect(&region, Color::RED);
+                        } else {
+                            gfx.stroke_rect(&region, Color::GREEN);
+                        }
+                    }
+                    _ => gfx.stroke_rect(&region, Color::GREEN)
+                }
+
+                gfx.present(&window);
+            }
         }
     }
 }
