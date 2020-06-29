@@ -266,7 +266,16 @@ struct Game {
     current_action: Option<Action>,
 
     /// Index of the card currently selected
-    current_card: Option<usize>
+    current_card: Option<usize>,
+
+    /// Has a card been discarded in a turn. Used when checking if to transform to Monstrous form
+    discarded: bool,
+
+    /// Number of cards withheld at the beginning of the game. Worth 3 points each if game is won.
+    payments: u32,
+
+    /// Trophies gathered during the course of the game
+    trophies: u32,
 }
 
 impl Game {
@@ -312,6 +321,9 @@ impl Game {
             5, 5, 5, 5, 5, 5, 5, 5
         ];
 
+        // Number of initial cards removed 
+        let payments = 1;
+
         // Shuffle the deck
         for _ in 0..1000 {
             let x = rand::random::<usize>() % deck.len();
@@ -321,6 +333,9 @@ impl Game {
             }
             deck.swap(x, y);
         }
+
+        // Discard cards equal to payment
+        for _ in 0..payments { deck.pop(); }
 
         // Populate the initial hand
         let mut hand = Vec::new();
@@ -343,6 +358,9 @@ impl Game {
             hand_limit: 5,
             current_action: None,
             current_card: None,
+            discarded: false,
+            payments,
+            trophies: 0
         })
     }
 
@@ -360,9 +378,15 @@ impl Game {
                 Vector::new(10.0, 100.0),
             )?;
 
+            let message = if self.monsters.alive.iter().any(|&x| x == true) {
+                "YOU LOST!"
+            } else {
+                "YOU WON!"
+            };
+
             font.draw( 
                 &mut gfx,
-                "LOST!",
+                message,
                 Color::RED,
                 Vector::new(10.0, 150.0),
             )?;
@@ -377,6 +401,45 @@ impl Game {
             self.clickables.clear();
             let fullscreen = Rectangle::new(Vector::new(5.0, 160.0), Vector::new(350.0, 50.0));
             self.clickables.push((fullscreen, ClickableType::State(State::Reset)));
+
+            font.draw( 
+                &mut gfx,
+                "Score:",
+                Color::RED,
+                Vector::new(10.0, 300.0),
+            )?;
+
+            font.draw( 
+                &mut gfx,
+                &format!("Payments:   {} ({} * 3)", self.payments * 3, self.payments),
+                Color::RED,
+                Vector::new(10.0, 350.0),
+            )?;
+
+            font.draw( 
+                &mut gfx,
+                &format!("Trophies:   {} ({} * 2)", self.trophies * 2, self.trophies),
+                Color::RED,
+                Vector::new(10.0, 400.0),
+            )?;
+
+            font.draw( 
+                &mut gfx,
+                &format!("Cards left: {} (hand: {} deck: {})", self.hand.len() + self.deck.len(),
+                         self.hand.len(), self.deck.len()),
+                Color::RED,
+                Vector::new(10.0, 450.0),
+            )?;
+
+            font.draw( 
+                &mut gfx,
+                &format!("Total:      {}", self.payments * 3 
+                         + self.trophies * 2 
+                         + self.hand.len() as u32 + self.deck.len() as u32),
+                Color::RED,
+                Vector::new(10.0, 500.0),
+            )?;
+
             return gfx.present(&window);
         }
 
@@ -552,40 +615,53 @@ impl Game {
 
             // Draw the strength adjustment if it is there for each monster
             if self.monsters.alive[monster_index] {
-                font.draw( 
-                    &mut gfx,
-                    &format!("+{}", self.monsters.strength_adjustments[monster_index]),
-                    Color::RED,
-                    Vector::new(curr_x + 20.0, curr_y + 20.0),
-                )?;
+                let adjustment = self.monsters.strength_adjustments[monster_index];
+                if adjustment > 0 {
+                    font.draw( 
+                        &mut gfx,
+                        &format!("+{}", adjustment),
+                        Color::RED,
+                        Vector::new(curr_x + 20.0, curr_y + 20.0),
+                    )?;
+                }
             }
 
-            // Display Reign tooltip next to a monster that needs to be killed before the current
-            if monster_index > 0 && self.monsters.alive[monster_index - 1] {
-               let left_strength = self.monsters.strengths[monster_index - 1]; 
-               let curr_strength = self.monsters.strengths[monster_index];
-               if left_strength < curr_strength {
-                    let region = Rectangle::new(
-                        Vector::new(curr_x, 
-                                    curr_y + image.size().y * 0.5 - reign_target_size.y * 0.5), 
-                        reign_target_size);
-                    gfx.draw_image(&reign_target_image, region);
-                    gfx.stroke_rect(&region, Color::BLACK);
-               }
-            }
+            if matches!(self.monsters.abilities[monster_index], Some(Ability::Reign)) && 
+                    self.monsters.alive[monster_index] {
+                // Display Reign tooltip next to a monster that needs to be killed before the 
+                // current monster can be killed
+                if monster_index > 0 && self.monsters.alive[monster_index - 1] {
+                    let left_strength = self.monsters.strengths[monster_index - 1]
+                        + self.monsters.strength_adjustments[monster_index - 1];
+                    let curr_strength = self.monsters.strengths[monster_index]
+                        + self.monsters.strength_adjustments[monster_index];
+                    if left_strength < curr_strength {
+                        let region = Rectangle::new(
+                            Vector::new(curr_x, 
+                                        curr_y + image.size().y * 0.5 - reign_target_size.y * 0.5), 
+                            reign_target_size);
+                        gfx.draw_image(&reign_target_image, region);
+                        gfx.stroke_rect(&region, Color::BLACK);
+                    }
+                }
 
-            // Display Reign tooltip next to a monster that needs to be killed before the current
-            if monster_index < (MONSTER_DECK_SIZE - 1) && self.monsters.alive[monster_index + 1] {
-               let right_strength = self.monsters.strengths[monster_index + 1]; 
-               let curr_strength = self.monsters.strengths[monster_index];
-               if right_strength < curr_strength {
-                    let region = Rectangle::new(
-                        Vector::new(curr_x + image.size().x - reign_target_size.x, 
-                                    curr_y + image.size().y * 0.5 - reign_target_size.y * 0.5), 
-                        reign_target_size);
-                    gfx.draw_image(&reign_target_image, region);
-                    gfx.stroke_rect(&region, Color::BLACK);
-               }
+                // Display Reign tooltip next to a monster that needs to be killed before the 
+                // current monster can be killed
+                if monster_index < (MONSTER_DECK_SIZE - 1) 
+                    && self.monsters.alive[monster_index + 1] {
+                    let right_strength = self.monsters.strengths[monster_index + 1]
+                        + self.monsters.strength_adjustments[monster_index + 1];
+                    let curr_strength = self.monsters.strengths[monster_index]
+                        + self.monsters.strength_adjustments[monster_index];
+                    if right_strength < curr_strength {
+                        let region = Rectangle::new(
+                            Vector::new(curr_x + image.size().x - reign_target_size.x, 
+                                        curr_y + image.size().y * 0.5 - reign_target_size.y * 0.5), 
+                            reign_target_size);
+                        gfx.draw_image(&reign_target_image, region);
+                        gfx.stroke_rect(&region, Color::BLACK);
+                    }
+                }
             }
 
             // Update curr_x for the next monster
@@ -752,7 +828,14 @@ impl Game {
             &mut gfx,
             &format!("Deck left: {}", self.deck.len()),
             Color::WHITE,
-            Vector::new(curr_x + 3.0, curr_y + image.size().y),
+            Vector::new(curr_x + 3.0, curr_y + image.size().y * 0.75),
+        )?;
+
+        font.draw( 
+            &mut gfx,
+            &format!("Trophies: {}", self.trophies),
+            Color::WHITE,
+            Vector::new(curr_x + 3.0, curr_y + image.size().y * 1.0),
         )?;
 
 
@@ -777,6 +860,7 @@ impl Game {
         // Variables set if an action is valid
         let mut current_monster = None;
         let mut reset = false;
+        let mut add_trophy = false;
 
         // If we have selected a card and an action, perform the logic for that request
         match (self.current_action, self.current_card) {
@@ -812,6 +896,7 @@ impl Game {
                         if new_index >= MONSTER_DECK_SIZE {
                             new_index = MONSTER_DECK_SIZE - 1;
                         }
+
                         self.companion_index = new_index;
                         info!("New companion index: {}", self.companion_index);
                         self.companion_index
@@ -821,9 +906,16 @@ impl Game {
                 // Add the ToSlay marker to the moved to monster
                 self.monsters.current_hits[index].push(ToSlay::Move);
 
+                if num as u8 == (self.monsters.strengths[index] 
+                                 + self.monsters.strength_adjustments[index]) {
+                    add_trophy = true;
+                }
+
                 // Moving onto a Noxious monster results in randomly losing a card
-                if matches!(self.monsters.abilities[index], Some(Ability::Noxious)) {
+                if matches!(self.monsters.abilities[index], Some(Ability::Noxious)) 
+                        && self.monsters.alive[index] {
                     self.hand.remove(rand::random::<usize>() % self.hand.len());
+                    self.discarded = true;
                 }
 
                 current_monster = Some(index);
@@ -871,6 +963,12 @@ impl Game {
                                 .push(ToSlay::Range);
 
                             current_monster = Some(self.companion_index - num);
+
+                            let monster_str = self.monsters.strengths[self.companion_index - num]
+                                + self.monsters.strength_adjustments[self.companion_index - num];
+                            if num as u8 == monster_str {
+                                add_trophy = true;
+                            }
                         }
                     }
                     Entity::Character => {
@@ -881,6 +979,12 @@ impl Game {
                                 .push(ToSlay::Range);
 
                             current_monster = Some(self.player_index - num);
+
+                            let monster_str = self.monsters.strengths[self.player_index - num]
+                                + self.monsters.strength_adjustments[self.player_index - num];
+                            if num as u8 == monster_str {
+                                add_trophy = true;
+                            }
                         }
                     }
                 }
@@ -906,6 +1010,12 @@ impl Game {
                             self.monsters.current_hits[self.companion_index + num]
                                 .push(ToSlay::Range);
                             current_monster = Some(self.companion_index + num);
+
+                            let monster_str = self.monsters.strengths[self.companion_index + num]
+                                + self.monsters.strength_adjustments[self.companion_index + num];
+                            if num as u8 == monster_str {
+                                add_trophy = true;
+                            }
                         }
                     }
                     Entity::Character => {
@@ -915,6 +1025,12 @@ impl Game {
                             self.monsters.current_hits[self.player_index + num]
                                 .push(ToSlay::Range);
                             current_monster = Some(self.player_index + num);
+
+                            let monster_str = self.monsters.strengths[self.player_index + num]
+                                + self.monsters.strength_adjustments[self.player_index + num];
+                            if num as u8 == monster_str {
+                                add_trophy = true;
+                            }
                         }
                     }
                 }
@@ -939,13 +1055,18 @@ impl Game {
                 };
 
                 // Get the current monster strength
-                let monster_strength = self.monsters.strengths[monster_index];
+                let monster_strength = self.monsters.strengths[monster_index] 
+                    + self.monsters.strength_adjustments[monster_index];
 
                 // If the action card number is greater than or equal to the monster strength,
                 // it is a successful melee attack
                 if num >= monster_strength {
                     self.monsters.current_hits[monster_index].push(ToSlay::Melee);
                     current_monster = Some(monster_index);
+
+                    if num == monster_strength {
+                        add_trophy = true;
+                    }
                 }
 
                 // Reset the chosen card and action
@@ -981,6 +1102,11 @@ impl Game {
                 if to_slays.len() == 0 {
                     self.monsters.alive[index] = false;
                     self.monsters.current_hits[index].clear();
+
+                    // If the last action resulted in a trophy, add it
+                    if add_trophy {
+                        self.trophies += 1;
+                    }
                 }
             }
         }
@@ -990,9 +1116,10 @@ impl Game {
             self.monsters.strength_adjustments[index] = 0;
         }
 
-        // Adjust the strength_adjustments for Rally monsters
+        // Adjust the strength_adjustments for Rally monsters if that monster is alive
         for index in 0..MONSTER_DECK_SIZE {
-            if matches!(self.monsters.abilities[index], Some(Ability::Rally)) {
+            if matches!(self.monsters.abilities[index], Some(Ability::Rally)) 
+                    && self.monsters.alive[index] {
                 info!("Rally {}", index);
                 if index > 0 {
                     self.monsters.strength_adjustments[index - 1] += 1;
@@ -1005,7 +1132,7 @@ impl Game {
         }
 
         // We are out of cards in hand and should reset
-        if self.hand.len() == 0 {
+        if self.hand.len() == 0 && !self.discarded {
             reset = true;
 
             // If we ran out of cards then we can always say the player is Monstrous
@@ -1036,6 +1163,8 @@ impl Game {
         if self.hand.len() == 0 && self.deck.len() == 0 {
             self.state = State::EndGame;
         }
+
+        self.discarded = false;
     }
 }
 
