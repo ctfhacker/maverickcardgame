@@ -322,7 +322,7 @@ impl Game {
         ];
 
         // Number of initial cards removed 
-        let payments = 1;
+        let payments = PAYMENTS;
 
         // Shuffle the deck
         for _ in 0..1000 {
@@ -914,8 +914,10 @@ impl Game {
                 // Moving onto a Noxious monster results in randomly losing a card
                 if matches!(self.monsters.abilities[index], Some(Ability::Noxious)) 
                         && self.monsters.alive[index] {
-                    self.hand.remove(rand::random::<usize>() % self.hand.len());
-                    self.discarded = true;
+                    if self.hand.len() > 0 {
+                        self.hand.remove(rand::random::<usize>() % self.hand.len());
+                        self.discarded = true;
+                    }
                 }
 
                 current_monster = Some(index);
@@ -1090,6 +1092,7 @@ impl Game {
         // to_slays vector is empty, then that monster is dead.
         if let Some(index) = current_monster {
             if self.monsters.alive[index] {
+
                 let curr_hits = &self.monsters.current_hits[index];
                 let mut to_slays  = self.monsters.to_slays[index].clone();
 
@@ -1098,8 +1101,32 @@ impl Game {
                     to_slays.remove_item(&curr_hit);
                 }
 
+                let mut reign = false;
+                let curr_strength = self.monsters.strengths[index]
+                    + self.monsters.strength_adjustments[index];
+
+                if index > 0 {
+                    if self.monsters.alive[index - 1] {
+                        let left_strength = self.monsters.strengths[index - 1]
+                            + self.monsters.strength_adjustments[index - 1];
+                        if left_strength >= curr_strength {
+                            reign = true;
+                        }
+                    }
+                }
+
+                if index < (MONSTER_DECK_SIZE - 1) {
+                    if self.monsters.alive[index + 1] {
+                        let right_strength = self.monsters.strengths[index + 1]
+                            + self.monsters.strength_adjustments[index + 1];
+                        if right_strength >= curr_strength {
+                            reign = true;
+                        }
+                    }
+                }
+
                 // If to_slays is empty, we have enough hits for the monster to be dead
-                if to_slays.len() == 0 {
+                if to_slays.len() == 0 && !reign {
                     self.monsters.alive[index] = false;
                     self.monsters.current_hits[index].clear();
 
@@ -1157,6 +1184,11 @@ impl Game {
                 curr_hit.clear();
             }
 
+        }
+
+        // If all monsters are dead, game is over
+        if self.monsters.alive.iter().all(|&x| x == false) {
+            self.state = State::EndGame;
         }
 
         // End game is triggered when no cards in hand and no cards left in the deck
