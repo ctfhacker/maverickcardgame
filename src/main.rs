@@ -495,7 +495,7 @@ impl Game {
         let reign_target_image = &self.images[&AssetType::ReignTarget];
         let reign_target_size = reign_target_image.size() * 0.2;
 
-        if self.player_index > 0 {
+        if self.player_index > 1 {
             // Draw action clickables on the right side of the player
             let region = Rectangle::new(
                 Vector::new(curr_x - range_target_size.x / 2.0, 
@@ -574,7 +574,7 @@ impl Game {
             // Draw quality of life indexes above monsters on character side to allow for easier 
             // count
             let player_offset = (self.player_index as isize - monster_index as isize).abs();
-            if player_offset > 0 && player_offset <= 5 {
+            if player_offset > 0 && player_offset <= 5 && monster_index > 0 {
                 font.draw( 
                     &mut gfx,
                     &format!("{}", player_offset),
@@ -594,7 +594,7 @@ impl Game {
             // Draw quality of life indexes above monsters on character side to allow for easier 
             // count
             let companion_offset = (self.companion_index as isize - monster_index as isize).abs();
-            if companion_offset > 0 && companion_offset <= 5 {
+            if companion_offset > 0 && companion_offset <= 5 && monster_index > 0 {
                 font.draw( 
                     &mut gfx,
                     &format!("{}", companion_offset),
@@ -704,7 +704,7 @@ impl Game {
         let region = Rectangle::new(Vector::new(curr_x, curr_y), image.size());
         gfx.draw_image(&image, region);
 
-        if self.companion_index > 0 {
+        if self.companion_index > 1 {
             if matches!(self.companion_kind, CompanionKind::Range) {
                 // If the companion is range, draw the range action button on the left side
                 let region = Rectangle::new(
@@ -888,6 +888,10 @@ impl Game {
                 let index = match (entity, direction) {
                     (Entity::Character, Direction::Left) => {
                         self.player_index = self.player_index.saturating_sub(num);
+                        if self.player_index == 0 {
+                            // Ensure we never move back onto the dungeon deck when moving left
+                            self.player_index = 1;
+                        }
                         info!("New player index left: {}", self.player_index);
                         self.player_index
                     }
@@ -902,6 +906,10 @@ impl Game {
                     }
                     (Entity::Companion, Direction::Left) => {
                         self.companion_index = self.companion_index.saturating_sub(num);
+                        if self.companion_index == 0 {
+                            // Ensure we never move back onto the dungeon deck when moving left
+                            self.companion_index = 1;
+                        }
                         info!("New companion index: {}", self.companion_index);
                         self.companion_index
                     }
