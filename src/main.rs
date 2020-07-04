@@ -83,29 +83,38 @@ struct Monsters {
     alive: Vec<bool>
 }
 
+impl Monsters {
+    /// Return the current strength of the given index by adding the adjustment to the base strength
+    fn strength(&self, index: usize) -> u8 {
+        assert!(index < MONSTER_DECK_SIZE, "Attempted to get strength out of bounds: {} of {}", index, MONSTER_DECK_SIZE);
+
+        self.strengths[index] + self.strength_adjustments[index]
+    }
+}
+
 type MonsterStats = (&'static str, u8, Option<Ability>, [Option<ToSlay>; 3]);
 
 
 /// Monster stats for the available monsters
 const MONSTER_STATS: [MonsterStats; 18] = [
-    ("Banshee",    1, None, [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
-    ("Beholder",   1, None, [Some(ToSlay::Range), Some(ToSlay::Range), Some(ToSlay::Range)]),
-    ("Bug",        1, None, [Some(ToSlay::Range), None, None]),
-    ("Demon",      5, None, [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
-    ("Dragon",     5, Some(Ability::Reign), [Some(ToSlay::Move), Some(ToSlay::Melee), Some(ToSlay::Range)]),
-    ("Elemental",  2, None, [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
+    ("Banshee",    1, None,                   [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
+    ("Beholder",   1, None,                   [Some(ToSlay::Range), Some(ToSlay::Range), Some(ToSlay::Range)]),
+    ("Bug",        1, None,                   [Some(ToSlay::Range), None, None]),
+    ("Demon",      5, None,                   [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
+    ("Dragon",     5, Some(Ability::Reign),   [Some(ToSlay::Move), Some(ToSlay::Melee), Some(ToSlay::Range)]),
+    ("Elemental",  2, None,                   [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
     ("Ghost",      0, Some(Ability::Noxious), [Some(ToSlay::Move), None, None]),
-    ("Golem",      3, Some(Ability::Reign), [Some(ToSlay::Melee), None, None]),
-    ("Hellhound",  2, None, [Some(ToSlay::Range), None, None]),
-    ("Howler",     4, Some(Ability::Rally), [Some(ToSlay::Melee), None, None]),
-    ("Imp",        0, None, [Some(ToSlay::Move), Some(ToSlay::Move), None]),
-    ("Lich",       4, Some(Ability::Reign), [Some(ToSlay::Range), None, None]),
+    ("Golem",      3, Some(Ability::Reign),   [Some(ToSlay::Melee), None, None]),
+    ("Hellhound",  2, None,                   [Some(ToSlay::Range), None, None]),
+    ("Howler",     4, Some(Ability::Rally),   [Some(ToSlay::Melee), None, None]),
+    ("Imp",        0, None,                   [Some(ToSlay::Move), Some(ToSlay::Move), None]),
+    ("Lich",       4, Some(Ability::Reign),   [Some(ToSlay::Range), None, None]),
     ("Scorpion",   1, Some(Ability::Noxious), [Some(ToSlay::Melee), Some(ToSlay::Range), None]),
-    ("Skeleton",   2, None, [Some(ToSlay::Move), Some(ToSlay::Melee), None]),
+    ("Skeleton",   2, None,                   [Some(ToSlay::Move), Some(ToSlay::Melee), None]),
     ("Spider",     1, Some(Ability::Noxious), [Some(ToSlay::Range), Some(ToSlay::Range), None]),
-    ("Troglodyte", 1, Some(Ability::Rally), [Some(ToSlay::Move), Some(ToSlay::Melee), None]),
-    ("Troll",      3, None, [Some(ToSlay::Move), Some(ToSlay::Range), None]),
-    ("Werewolf",   2, None, [Some(ToSlay::Melee), Some(ToSlay::Melee), None]),
+    ("Troglodyte", 1, Some(Ability::Rally),   [Some(ToSlay::Move), Some(ToSlay::Melee), None]),
+    ("Troll",      3, None,                   [Some(ToSlay::Move), Some(ToSlay::Range), None]),
+    ("Werewolf",   2, None,                   [Some(ToSlay::Melee), Some(ToSlay::Melee), None]),
 ];
 
 impl Monsters {
@@ -115,7 +124,6 @@ impl Monsters {
         // Create the monster deck via a random selection of 13 monsters
         let mut monster_indexes = Vec::new();
         loop {
-            // If we h
             if monster_indexes.len() == MONSTER_DECK_SIZE {
                 break;
             }
@@ -131,7 +139,7 @@ impl Monsters {
             }
         }
 
-        // Init the monsters struct
+        // Init the monsters struct 
         let mut monsters = Monsters {
             images: Vec::new(),
             names: Vec::new(),
@@ -142,6 +150,17 @@ impl Monsters {
             current_hits: Vec::new(),
             alive: Vec::new(),
         };
+        
+        // The first empty element is the deck itself
+        monsters.images.push(Image::load(&gfx, "action.png").await?);
+        monsters.names.push("Deck");
+        monsters.strengths.push(0);
+        monsters.strength_adjustments.push(0);
+        monsters.abilities.push(None);
+        monsters.to_slays.push(Vec::new());
+        monsters.current_hits.push(Vec::new());
+        monsters.alive.push(false);
+
 
         // Populate the Monsters struct
         for &index in &monster_indexes {
@@ -589,7 +608,7 @@ impl Game {
             }
 
             // Draw each image in Row 2
-            let region = Rectangle::new(Vector::new(curr_x, curr_y), image_size);
+            let region = Rectangle::new(Vector::new(curr_x, curr_y), Vector::new(image_width, image_size.y));
             gfx.draw_image(&image, region);
 
             // Draw each of the current hits on each monster
@@ -631,10 +650,8 @@ impl Game {
                 // Display Reign tooltip next to a monster that needs to be killed before the 
                 // current monster can be killed
                 if monster_index > 0 && self.monsters.alive[monster_index - 1] {
-                    let left_strength = self.monsters.strengths[monster_index - 1]
-                        + self.monsters.strength_adjustments[monster_index - 1];
-                    let curr_strength = self.monsters.strengths[monster_index]
-                        + self.monsters.strength_adjustments[monster_index];
+                    let left_strength = self.monsters.strength(monster_index - 1);
+                    let curr_strength = self.monsters.strength(monster_index);
                     if left_strength < curr_strength {
                         let region = Rectangle::new(
                             Vector::new(curr_x, 
@@ -649,10 +666,8 @@ impl Game {
                 // current monster can be killed
                 if monster_index < (MONSTER_DECK_SIZE - 1) 
                     && self.monsters.alive[monster_index + 1] {
-                    let right_strength = self.monsters.strengths[monster_index + 1]
-                        + self.monsters.strength_adjustments[monster_index + 1];
-                    let curr_strength = self.monsters.strengths[monster_index]
-                        + self.monsters.strength_adjustments[monster_index];
+                    let right_strength = self.monsters.strength(monster_index + 1);
+                    let curr_strength = self.monsters.strength(monster_index);
                     if right_strength < curr_strength {
                         let region = Rectangle::new(
                             Vector::new(curr_x + image.size().x - reign_target_size.x, 
@@ -860,7 +875,6 @@ impl Game {
         // Variables set if an action is valid
         let mut current_monster = None;
         let mut reset = false;
-        let mut add_trophy = false;
 
         // If we have selected a card and an action, perform the logic for that request
         match (self.current_action, self.current_card) {
@@ -903,12 +917,16 @@ impl Game {
                     }
                 };
 
-                // Add the ToSlay marker to the moved to monster
-                self.monsters.current_hits[index].push(ToSlay::Move);
+                // Only add a Move hit if the current monster can be hit by Move
+                if self.monsters.to_slays[index].contains(&ToSlay::Move)  {
 
-                if num as u8 == (self.monsters.strengths[index] 
-                                 + self.monsters.strength_adjustments[index]) {
-                    add_trophy = true;
+                    // Add the ToSlay marker to the moved to monster
+                    self.monsters.current_hits[index].push(ToSlay::Move);
+
+                    // If the number used is the same as the strength, then add a trophy
+                    if num as u8 == self.monsters.strength(index) {
+                        self.trophies += 1;
+                    }
                 }
 
                 // Moving onto a Noxious monster results in randomly losing a card
@@ -961,15 +979,20 @@ impl Game {
                         // Ensure we are in bounds for the range attack
                         if matches!(self.companion_index.checked_sub(num), Some(0..13)) {
                             info!("Range LEFT Companion {} hitting {}", num, self.monsters.names[num]);
-                            self.monsters.current_hits[self.companion_index - num]
-                                .push(ToSlay::Range);
 
                             current_monster = Some(self.companion_index - num);
 
-                            let monster_str = self.monsters.strengths[self.companion_index - num]
-                                + self.monsters.strength_adjustments[self.companion_index - num];
-                            if num as u8 == monster_str {
-                                add_trophy = true;
+                            // Only add hits if the monster actually can be hit by Range
+                            if self.monsters.to_slays[self.companion_index - num].contains(&ToSlay::Range) {
+                                // Add the Range hit to the current hits
+                                self.monsters.current_hits[self.companion_index - num]
+                                    .push(ToSlay::Range);
+
+                                // Check if we should get a trophy
+                                let monster_str = self.monsters.strength(self.companion_index - num);
+                                if num as u8 == monster_str {
+                                    self.trophies += 1;
+                                }
                             }
                         }
                     }
@@ -977,15 +1000,20 @@ impl Game {
                         // Ensure we are in bounds for the range attack
                         if matches!(self.player_index.checked_sub(num), Some(0..13)) {
                             info!("Range LEFT Character {} hitting {}", num, self.monsters.names[num]);
-                            self.monsters.current_hits[self.player_index - num]
-                                .push(ToSlay::Range);
 
                             current_monster = Some(self.player_index - num);
 
-                            let monster_str = self.monsters.strengths[self.player_index - num]
-                                + self.monsters.strength_adjustments[self.player_index - num];
-                            if num as u8 == monster_str {
-                                add_trophy = true;
+                            // Only add hits if the monster actually can be hit by Range
+                            if self.monsters.to_slays[self.companion_index - num].contains(&ToSlay::Range) {
+                                // Add the Range hit to the current hits
+                                self.monsters.current_hits[self.player_index - num]
+                                    .push(ToSlay::Range);
+
+                                // Check if we should get a trophy
+                                let monster_str = self.monsters.strength(self.player_index - num);
+                                if num as u8 == monster_str {
+                                    self.trophies += 1;
+                                }
                             }
                         }
                     }
@@ -1009,14 +1037,19 @@ impl Game {
                         // Ensure companion are in bounds for the range attack
                         if self.companion_index + num < MONSTER_DECK_SIZE {
                             info!("Range RIGHT {} hitting {}", num, self.monsters.names[num]);
-                            self.monsters.current_hits[self.companion_index + num]
-                                .push(ToSlay::Range);
                             current_monster = Some(self.companion_index + num);
 
-                            let monster_str = self.monsters.strengths[self.companion_index + num]
-                                + self.monsters.strength_adjustments[self.companion_index + num];
-                            if num as u8 == monster_str {
-                                add_trophy = true;
+                            // Only add a Range hit if the monster can be hit by Range
+                            if self.monsters.to_slays[self.companion_index + num].contains(&ToSlay::Range) {
+                                // Add the Range hit
+                                self.monsters.current_hits[self.companion_index + num]
+                                    .push(ToSlay::Range);
+
+                                // Check if we should get a trophy
+                                let monster_str = self.monsters.strength(self.companion_index + num);
+                                if num as u8 == monster_str {
+                                    self.trophies += 1;
+                                }
                             }
                         }
                     }
@@ -1024,14 +1057,18 @@ impl Game {
                         // Ensure character are in bounds for the range attack
                         if self.player_index + num < MONSTER_DECK_SIZE {
                             info!("Range RIGHT {} hitting {}", num, self.monsters.names[num]);
-                            self.monsters.current_hits[self.player_index + num]
-                                .push(ToSlay::Range);
                             current_monster = Some(self.player_index + num);
 
-                            let monster_str = self.monsters.strengths[self.player_index + num]
-                                + self.monsters.strength_adjustments[self.player_index + num];
-                            if num as u8 == monster_str {
-                                add_trophy = true;
+                            // Only add Range Hit if the current monster can be hit by Range
+                            if self.monsters.to_slays[self.companion_index + num].contains(&ToSlay::Range) {
+                                self.monsters.current_hits[self.player_index + num]
+                                    .push(ToSlay::Range);
+
+                                // Check if we should gain a trophy
+                                let monster_str = self.monsters.strength(self.player_index + num);
+                                if num as u8 == monster_str {
+                                    self.trophies += 1;
+                                }
                             }
                         }
                     }
@@ -1057,17 +1094,22 @@ impl Game {
                 };
 
                 // Get the current monster strength
-                let monster_strength = self.monsters.strengths[monster_index] 
-                    + self.monsters.strength_adjustments[monster_index];
+                let monster_strength = self.monsters.strength(monster_index);
 
                 // If the action card number is greater than or equal to the monster strength,
                 // it is a successful melee attack
                 if num >= monster_strength {
-                    self.monsters.current_hits[monster_index].push(ToSlay::Melee);
                     current_monster = Some(monster_index);
 
-                    if num == monster_strength {
-                        add_trophy = true;
+                    // Only add a Melee hit if the current monster can be hit by Melee
+                    if self.monsters.to_slays[monster_index].contains(&ToSlay::Melee) {
+                        // Add the Melee hit to the current monster
+                        self.monsters.current_hits[monster_index].push(ToSlay::Melee);
+
+                        // Check if we should add a trophy
+                        if num == monster_strength {
+                            self.trophies += 1;
+                        }
                     }
                 }
 
@@ -1102,25 +1144,24 @@ impl Game {
                 }
 
                 let mut reign = false;
-                let curr_strength = self.monsters.strengths[index]
-                    + self.monsters.strength_adjustments[index];
+                let curr_strength = self.monsters.strength(index);
 
-                if index > 0 {
-                    if self.monsters.alive[index - 1] {
-                        let left_strength = self.monsters.strengths[index - 1]
-                            + self.monsters.strength_adjustments[index - 1];
-                        if left_strength >= curr_strength {
-                            reign = true;
+                if matches!(self.monsters.abilities[index], Some(Ability::Reign)) {
+                    if index > 0 {
+                        if self.monsters.alive[index - 1] {
+                            let left_strength = self.monsters.strength(index - 1);
+                            if left_strength >= curr_strength {
+                                reign = true;
+                            }
                         }
                     }
-                }
 
-                if index < (MONSTER_DECK_SIZE - 1) {
-                    if self.monsters.alive[index + 1] {
-                        let right_strength = self.monsters.strengths[index + 1]
-                            + self.monsters.strength_adjustments[index + 1];
-                        if right_strength >= curr_strength {
-                            reign = true;
+                    if index < (MONSTER_DECK_SIZE - 1) {
+                        if self.monsters.alive[index + 1] {
+                            let right_strength = self.monsters.strength(index + 1);
+                            if right_strength >= curr_strength {
+                                reign = true;
+                            }
                         }
                     }
                 }
@@ -1129,11 +1170,6 @@ impl Game {
                 if to_slays.len() == 0 && !reign {
                     self.monsters.alive[index] = false;
                     self.monsters.current_hits[index].clear();
-
-                    // If the last action resulted in a trophy, add it
-                    if add_trophy {
-                        self.trophies += 1;
-                    }
                 }
             }
         }
@@ -1169,11 +1205,8 @@ impl Game {
         }
 
         if reset {
-            // Clear the hand to be replinished
-            self.hand.clear();
-
-            // Replinish hand of cards
-            for _ in 0..self.hand_limit {
+            // Replinish cards up to hand limit
+            for _ in 0..(self.hand_limit - self.hand.len() as u8) {
                 if let Some(new_card) = self.deck.pop() {
                     self.hand.push(new_card);
                 }
